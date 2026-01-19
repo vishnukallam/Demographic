@@ -1,0 +1,182 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Interactive Map to MongoDB</title>
+    <link
+      rel="stylesheet"
+      href="https://cdn.jsdelivr.net/npm/ol@v10.3.1/ol.css"
+    />
+    <style>
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        font-family: "Segoe UI", sans-serif;
+        background: #f0f2f5;
+        padding: 20px;
+      }
+      .container {
+        max-width: 1000px;
+        margin: auto;
+      }
+      h2 {
+        text-align: center;
+        color: #1976d2;
+      }
+      .search-box {
+        display: flex;
+        gap: 10px;
+        margin-bottom: 15px;
+        justify-content: center;
+      }
+      #searchInput {
+        padding: 10px;
+        width: 300px;
+        border-radius: 6px;
+        border: 1px solid #ccc;
+      }
+      #searchBtn {
+        padding: 10px 20px;
+        background: #1976d2;
+        color: white;
+        border: none;
+        border-radius: 6px;
+        cursor: pointer;
+      }
+      #map {
+        width: 100%;
+        height: 450px;
+        border-radius: 12px;
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+      }
+      #info {
+        margin-top: 15px;
+        padding: 15px;
+        background: white;
+        border-left: 6px solid #1976d2;
+        border-radius: 8px;
+      }
+      .status-msg {
+        font-size: 12px;
+        color: #666;
+        margin-top: 5px;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="container">
+      <h2>📍 Location to MongoDB</h2>
+      <div class="search-box">
+        <input type="text" id="searchInput" placeholder="Search a place..." />
+        <button id="searchBtn">Search</button>
+      </div>
+      <div id="map"></div>
+      <div id="info">Click the map to save details to database.</div>
+      <div id="status" class="status-msg"></div>
+    </div>
+
+    <script type="module">
+      import Map from "https://esm.sh/ol/Map.js";
+      import View from "https://esm.sh/ol/View.js";
+      import TileLayer from "https://esm.sh/ol/layer/Tile.js";
+      import OSM from "https://esm.sh/ol/source/OSM.js";
+      import { Feature } from "https://esm.sh/ol/index.js";
+      import { Point } from "https://esm.sh/ol/geom.js";
+      import VectorLayer from "https://esm.sh/ol/layer/Vector.js";
+      import VectorSource from "https://esm.sh/ol/source/Vector.js";
+      import { fromLonLat, toLonLat } from "https://esm.sh/ol/proj.js";
+      import { Style, Icon } from "https://esm.sh/ol/style.js";
+
+      const markerSource = new VectorSource();
+      const markerLayer = new VectorLayer({
+        source: markerSource,
+        style: new Style({
+          image: new Icon({
+            anchor: [0.5, 1],
+            src: "https://cdn-icons-png.flaticon.com/512/684/684908.png",
+            scale: 0.05,
+          }),
+        }),
+      });
+
+      const view = new View({ center: fromLonLat([0, 0]), zoom: 2 });
+      const map = new Map({
+        target: "map",
+        layers: [new TileLayer({ source: new OSM() }), markerLayer],
+        view: view,
+      });
+
+      // NEW: Function to send JSON to your Backend
+      async function saveLocationToMongo(data) {
+        const statusEl = document.getElementById("status");
+        statusEl.innerText = "Saving to MongoDB...";
+        try {
+          const response = await fetch("http://localhost:3000/api/locations", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(data),
+          });
+          if (response.ok)
+            statusEl.innerText = "✅ Successfully saved to MongoDB";
+          else statusEl.innerText = "❌ Database save failed";
+        } catch (err) {
+          statusEl.innerText = "❌ Connection error (is the server running?)";
+        }
+      }
+
+      async function processLocation(lat, lon, coord) {
+        const res = await fetch(
+          `https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lon}`
+        );
+        const data = await res.json();
+        const addr = data.address || {};
+
+        const locationDetails = {
+          latitude: lat,
+          longitude: lon,
+          area: addr.suburb || addr.neighbourhood || "N/A",
+          city: addr.city || addr.town || addr.village || "N/A",
+          state: addr.state || "N/A",
+          country: addr.country || "N/A",
+        };
+
+        // Update UI
+        document.getElementById(
+          "info"
+        ).innerHTML = `<strong>Address:</strong> ${data.display_name}`;
+
+        // Add Marker
+        markerSource.clear();
+        markerSource.addFeature(new Feature({ geometry: new Point(coord) }));
+
+        // SAVE TO DATABASE
+        saveLocationToMongo(locationDetails);
+      }
+
+      map.on("click", (e) => {
+        const [lon, lat] = toLonLat(e.coordinate);
+        processLocation(lat, lon, e.coordinate);
+      });
+
+      document
+        .getElementById("searchBtn")
+        .addEventListener("click", async () => {
+          const query = document.getElementById("searchInput").value;
+          const res = await fetch(
+            `https://nominatim.openstreetmap.org/search?format=json&q=${query}`
+          );
+          const data = await res.json();
+          if (data.length > 0) {
+            const lat = parseFloat(data[0].lat);
+            const lon = parseFloat(data[0].lon);
+            const coord = fromLonLat([lon, lat]);
+            view.animate({ center: coord, zoom: 14 });
+            processLocation(lat, lon, coord);
+          }
+        });
+    </script>
+  </body>
+</html>
