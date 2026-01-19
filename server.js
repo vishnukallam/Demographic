@@ -1,9 +1,9 @@
+require('dotenv').config();
 const express = require('express');
 const mongoose = require('mongoose');
 const cors = require('cors');
 const fs = require('fs');
 const path = require('path');
-const { exec } = require('child_process');
 
 const app = express();
 app.use(express.json());
@@ -12,9 +12,13 @@ app.use(cors());
 const JSON_FILE_PATH = path.join(__dirname, 'locations.json');
 
 // Connect to MongoDB
-mongoose.connect('mongodb://127.0.0.1:27017/mapData')
-  .then(() => console.log('Connected to MongoDB'))
-  .catch(err => console.error('Could not connect to MongoDB', err));
+const MONGODB_URI = process.env.MONGODB_URI || 'mongodb://127.0.0.1:27017/mapData';
+mongoose.connect(MONGODB_URI);
+
+const db = mongoose.connection;
+db.on('error', (err) => console.error('MongoDB connection error:', err));
+db.once('open', () => console.log('Connected to MongoDB'));
+db.on('disconnected', () => console.log('MongoDB disconnected'));
 
 const locationSchema = new mongoose.Schema({
   latitude: Number,
@@ -33,7 +37,7 @@ function handleJsonUpdate(newData) {
   // 1. Read the existing file
   fs.readFile(JSON_FILE_PATH, 'utf8', (err, data) => {
     let jsonArray = [];
-    
+
     if (!err && data) {
       try {
         jsonArray = JSON.parse(data);
@@ -51,12 +55,8 @@ function handleJsonUpdate(newData) {
         console.error("Error writing JSON:", writeErr);
         return;
       }
-      
-      console.log("JSON Updated.");
 
-      // 4. Open the file (Editors like VS Code will just refresh the tab)
-      const command = process.platform === 'win32' ? 'start' : 'open';
-      exec(`${command} "" "${JSON_FILE_PATH}"`);
+      console.log("JSON Updated.");
     });
   });
 }
@@ -78,4 +78,5 @@ app.post('/api/locations', async (req, res) => {
   }
 });
 
-app.listen(3000, () => console.log('Server running on port 3000'));
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
